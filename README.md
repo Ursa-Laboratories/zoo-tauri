@@ -5,6 +5,7 @@
 See also:
 
 - `docs/repo-overview.md`
+- `docs/upstream-sync.md`
 - `../docs/architecture/system-overview.md`
 - `../docs/reference/api-contracts.md`
 

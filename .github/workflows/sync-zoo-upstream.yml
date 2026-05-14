@@ -1,0 +1,157 @@
+name: Sync Zoo Upstream
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [zoo-updated]
+  schedule:
+    - cron: "17 * * * *"
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: sync-zoo-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Merge Zoo main into zoo-tauri
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout zoo-tauri
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch Zoo upstream
+        run: |
+          git remote add zoo-upstream https://github.com/Ursa-Laboratories/Zoo.git
+          git fetch zoo-upstream main
+
+      - name: Merge upstream main
+        id: merge
+        shell: bash
+        run: |
+          git switch -c sync/zoo-main
+          if git merge --no-edit zoo-upstream/main; then
+            echo "conflict=false" >> "$GITHUB_OUTPUT"
+          else
+            git merge --abort || true
+            echo "conflict=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open conflict issue
+        if: steps.merge.outputs.conflict == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          existing="$(gh issue list \
+            --repo "$GITHUB_REPOSITORY" \
+            --state open \
+            --search 'Zoo upstream sync conflict in:title' \
+            --json number \
+            --jq '.[0].number // empty')"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" \
+              --repo "$GITHUB_REPOSITORY" \
+              --body "The scheduled sync from Ursa-Laboratories/Zoo main still has merge conflicts. Run: \`git fetch zoo-upstream main && git merge zoo-upstream/main\` locally to resolve."
+          else
+            gh issue create \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Zoo upstream sync conflict" \
+              --body "Automated sync from Ursa-Laboratories/Zoo main could not merge cleanly into zoo-tauri main. Resolve locally, keeping the Tauri sidecar behavior intact, then push the resolved changes."
+          fi
+          exit 1
+
+      - name: Check for upstream changes
+        id: changes
+        if: steps.merge.outputs.conflict == 'false'
+        shell: bash
+        run: |
+          if [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Node
+        if: steps.changes.outputs.changed == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
+
+      - name: Setup Python
+        if: steps.changes.outputs.changed == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Setup uv
+        if: steps.changes.outputs.changed == 'true'
+        uses: astral-sh/setup-uv@v6
+
+      - name: Install root dependencies
+        if: steps.changes.outputs.changed == 'true'
+        run: npm ci
+
+      - name: Install frontend dependencies
+        if: steps.changes.outputs.changed == 'true'
+        working-directory: frontend
+        run: npm ci
+
+      - name: Backend tests
+        if: steps.changes.outputs.changed == 'true'
+        run: uv run --extra dev pytest tests/
+
+      - name: Frontend lint
+        if: steps.changes.outputs.changed == 'true'
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Frontend tests
+        if: steps.changes.outputs.changed == 'true'
+        working-directory: frontend
+        run: npm run test
+
+      - name: Frontend build
+        if: steps.changes.outputs.changed == 'true'
+        working-directory: frontend
+        run: npm run build
+
+      - name: Push sync branch
+        if: steps.changes.outputs.changed == 'true'
+        run: git push --force-with-lease origin sync/zoo-main
+
+      - name: Open or update sync PR
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if gh pr view sync/zoo-main --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh pr edit sync/zoo-main \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Sync Zoo main into zoo-tauri" \
+              --body "Automated merge from Ursa-Laboratories/Zoo main. CI verifies backend tests, frontend lint/tests/build, and leaves Tauri packaging changes in place for review."
+          else
+            gh pr create \
+              --repo "$GITHUB_REPOSITORY" \
+              --base main \
+              --head sync/zoo-main \
+              --title "Sync Zoo main into zoo-tauri" \
+              --body "Automated merge from Ursa-Laboratories/Zoo main. CI verifies backend tests, frontend lint/tests/build, and leaves Tauri packaging changes in place for review."
+          fi
