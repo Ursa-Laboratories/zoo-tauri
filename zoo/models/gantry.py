@@ -3,15 +3,14 @@ from CubOS (gantry.yaml_schema.GantryYamlSchema) — Zoo must not duplicate it."
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Dict, Optional
 
-from gantry.yaml_schema import GantryYamlSchema
 from pydantic import BaseModel
 
 
 class GantryResponse(BaseModel):
     filename: str
-    config: GantryYamlSchema
+    config: Dict[str, Any]
 
 
 class GantryPosition(BaseModel):

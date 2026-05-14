@@ -1,0 +1,18 @@
+{
+  "name": "zoo-tauri",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "npm run tauri:build:mac",
+    "tauri:build:mac": "npm run backend:package && tauri build --bundles app && npm run dmg:plain",
+    "tauri:build:windows": "npm run backend:package && tauri build --bundles nsis",
+    "backend:package": "uv run --with pyinstaller python scripts/package_backend.py",
+    "dmg:plain": "hdiutil create -volname Zoo -srcfolder src-tauri/target/release/bundle/macos/Zoo.app -ov -format UDZO src-tauri/target/release/bundle/dmg/Zoo_0.1.0_aarch64.dmg"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0"
+  }
+}

@@ -4,9 +4,8 @@ from copy import deepcopy
 import logging
 from typing import Any, Dict, Optional
 
-from deck import load_deck_from_yaml
 from deck.labware.well_plate import WellPlate
-from deck.loader import _derive_wells_from_calibration
+from deck.loader import _build_deck_from_raw, _derive_wells_from_calibration
 from deck.yaml_schema import WellPlateYamlEntry
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ValidationError
@@ -56,13 +55,14 @@ def get_deck(filename: str) -> DeckResponse:
     if not path.is_file():
         raise HTTPException(404, f"Config not found: {filename}")
 
-    # Use CubOS's loader for validation + well derivation.
+    raw = read_yaml(path)
+    # Use CubOS's loader path for validation + well derivation after a narrow
+    # API-compatibility pass for older Zoo field names.
     try:
-        deck = load_deck_from_yaml(path)
+        deck = _build_deck_from_raw(_normalize_deck_yaml(raw))
     except (ValueError, ValidationError) as e:
         raise HTTPException(400, str(e))
 
-    raw = read_yaml(path)
     items: list[LabwareResponse] = []
     for key, labware in deck.labware.items():
         config = _normalize_labware_config(raw.get("labware", {}).get(key, {}), labware, key)
@@ -95,7 +95,7 @@ def preview_wells(body: dict) -> Dict[str, WellPosition]:
     """Compute well positions from a well plate config using CubOS's
     calibration logic, without requiring the config to be saved first."""
     try:
-        entry = WellPlateYamlEntry.model_validate(body)
+        entry = WellPlateYamlEntry.model_validate(_normalize_labware_for_cubos(body))
         resolved_z = entry.a1_point.z
         if resolved_z is None:
             raise ValueError("Calibration A1 must include z for preview.")
@@ -133,9 +133,9 @@ def _serialize_geometry(geometry: Any) -> Optional[Dict[str, Optional[float]]]:
     if geometry is None:
         return None
     return {
-        "length_mm": getattr(geometry, "length_mm", None),
-        "width_mm": getattr(geometry, "width_mm", None),
-        "height_mm": getattr(geometry, "height_mm", None),
+        "length_mm": getattr(geometry, "length_mm", getattr(geometry, "length", None)),
+        "width_mm": getattr(geometry, "width_mm", getattr(geometry, "width", None)),
+        "height_mm": getattr(geometry, "height_mm", getattr(geometry, "height", None)),
     }
 
 
@@ -176,3 +176,41 @@ def _infer_labware_type(labware: Any, deck_key: str) -> Optional[str]:
     if labware_type is None:
         log.warning("Unknown labware class %r for key %s — type will not be inferred", class_name, deck_key)
     return labware_type
+
+
+_DECK_FIELD_ALIASES: Dict[str, str] = {
+    "length_mm": "length",
+    "width_mm": "width",
+    "height_mm": "height",
+    "diameter_mm": "diameter",
+    "x_offset_mm": "x_offset",
+    "y_offset_mm": "y_offset",
+    "z_pickup": "pickup_z",
+    "z_drop": "drop_z",
+}
+
+
+def _normalize_deck_yaml(data: Any) -> Dict[str, Any]:
+    if not isinstance(data, dict):
+        return {"labware": {}}
+    normalized = deepcopy(data)
+    labware = normalized.get("labware")
+    if isinstance(labware, dict):
+        normalized["labware"] = {
+            key: _normalize_labware_for_cubos(entry)
+            for key, entry in labware.items()
+        }
+    return normalized
+
+
+def _normalize_labware_for_cubos(entry: Any) -> Any:
+    if isinstance(entry, list):
+        return [_normalize_labware_for_cubos(item) for item in entry]
+    if not isinstance(entry, dict):
+        return entry
+
+    normalized: Dict[str, Any] = {}
+    for key, value in entry.items():
+        normalized_key = _DECK_FIELD_ALIASES.get(key, key)
+        normalized[normalized_key] = _normalize_labware_for_cubos(value)
+    return normalized

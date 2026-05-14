@@ -3,8 +3,11 @@ __pycache__/
 *.pyc
 *.egg-info/
 dist/
+build/
 node_modules/
 frontend/dist/
+src-tauri/binaries/
+src-tauri/target/
 .omx/
 .pi/
 .env

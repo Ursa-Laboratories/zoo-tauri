@@ -34,6 +34,45 @@ cd ..
 python -m zoo
 ```
 
+## Desktop App
+
+This Tauri copy packages the existing React UI with the same Zoo FastAPI backend as a sidecar. The backend still owns CubOS validation, YAML loading, gantry access, and protocol execution; the desktop shell only starts and stops that process.
+
+Prerequisites:
+
+- Rust/Cargo for Tauri builds
+- Node.js/npm for the frontend
+- uv for reproducible Python build commands
+- Python environment with Zoo dependencies installed
+- PyInstaller for packaging the Python backend sidecar
+
+Install and run in development:
+
+```bash
+npm install
+cd frontend
+npm ci
+cd ..
+python -m pip install -e ".[dev]"
+npm run tauri:dev
+```
+
+Build a downloadable desktop bundle:
+
+```bash
+npm run tauri:build:mac
+```
+
+The build command creates `src-tauri/target/release/bundle/macos/Zoo.app` and a plain compressed DMG at `src-tauri/target/release/bundle/dmg/Zoo_0.1.0_aarch64.dmg`. The desktop shell starts the backend on `127.0.0.1:8742` with browser auto-open disabled. Desktop config files default to the app data directory so they remain writable after installation.
+
+Build a Windows installer on a Windows runner:
+
+```bash
+npm run tauri:build:windows
+```
+
+The Windows workflow in `.github/workflows/windows-build.yml` uploads the generated NSIS setup executable as an artifact.
+
 Defaults:
 
 - host: `127.0.0.1`

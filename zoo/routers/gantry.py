@@ -128,6 +128,7 @@ def _normalize_gantry_yaml(data: Dict[str, Any]) -> Dict[str, Any]:
     fields that CubOS now requires so operators can save a corrected file.
     """
     normalized = copy.deepcopy(data)
+    normalized.setdefault("gantry_type", "cub")
     working_volume = dict(normalized.get("working_volume") or {})
     z_max = _float_or(working_volume.get("z_max"), 80.0)
     if z_max <= 0:
@@ -138,10 +139,24 @@ def _normalize_gantry_yaml(data: Dict[str, Any]) -> Dict[str, Any]:
     if cnc.get("y_axis_motion") not in {"head", "bed"}:
         cnc["y_axis_motion"] = "head"
 
-    total_z_height = max(_float_or(cnc.get("total_z_height"), z_max), z_max)
-    cnc["total_z_height"] = total_z_height
-    if cnc.get("structure_clearance_z") is None:
-        cnc["structure_clearance_z"] = total_z_height
+    total_z_range = max(
+        _float_or(
+            cnc.get("total_z_range", cnc.get("total_z_height")),
+            z_max,
+        ),
+        z_max,
+    )
+    if cnc.get("safe_z") is None and cnc.get("structure_clearance_z") is not None:
+        cnc["safe_z"] = cnc["structure_clearance_z"]
+    if cnc.get("safe_z") is not None:
+        safe_z = _float_or(cnc.get("safe_z"), z_max)
+        cnc["safe_z"] = max(
+            _float_or(working_volume.get("z_min"), 0.0),
+            min(safe_z, z_max),
+        )
+    cnc["total_z_range"] = total_z_range
+    cnc.pop("total_z_height", None)
+    cnc.pop("structure_clearance_z", None)
 
     normalized["cnc"] = cnc
     normalized["working_volume"] = working_volume
@@ -150,11 +165,32 @@ def _normalize_gantry_yaml(data: Dict[str, Any]) -> Dict[str, Any]:
         normalized["instruments"] = {}
     else:
         normalized.setdefault("instruments", {})
+        for instrument in normalized["instruments"].values():
+            if isinstance(instrument, dict):
+                instrument.pop("measurement_height", None)
+                instrument.pop("safe_approach_height", None)
     return normalized
 
 
 def _validated_gantry_config(data: Dict[str, Any]) -> GantryYamlSchema:
     return GantryYamlSchema.model_validate(_normalize_gantry_yaml(data))
+
+
+def _api_gantry_config(config: GantryYamlSchema) -> Dict[str, Any]:
+    """Return the stable Zoo API shape while CubOS owns schema validation."""
+    data = config.model_dump(mode="json", exclude_none=True)
+    cnc = dict(data.get("cnc") or {})
+    total_z_range = cnc.pop("total_z_range", None)
+    safe_z = cnc.pop("safe_z", None)
+    if total_z_range is not None:
+        cnc["total_z_height"] = total_z_range
+    if safe_z is not None:
+        cnc["structure_clearance_z"] = safe_z
+    elif total_z_range is not None:
+        cnc["structure_clearance_z"] = total_z_range
+    data["cnc"] = cnc
+    data.pop("gantry_type", None)
+    return data
 
 
 def _runtime_connect_config(config: Dict[str, Any]) -> Dict[str, Any]:
@@ -472,7 +508,7 @@ def get_gantry(filename: str) -> GantryResponse:
         raise HTTPException(404, f"Config not found: {filename}")
     data = read_yaml(path)
     config = _validated_gantry_config(data)
-    return GantryResponse(filename=filename, config=config)
+    return GantryResponse(filename=filename, config=_api_gantry_config(config))
 
 
 @router.put("/{filename}")

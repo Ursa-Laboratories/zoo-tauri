@@ -1,4 +1,11 @@
-const BASE = "/api";
+const DEFAULT_DESKTOP_API_BASE = "http://127.0.0.1:8742/api";
+const isTauri =
+  "__TAURI_INTERNALS__" in window ||
+  window.location.protocol === "tauri:" ||
+  window.location.hostname === "tauri.localhost";
+const BASE =
+  import.meta.env.VITE_API_BASE_URL ??
+  (isTauri ? DEFAULT_DESKTOP_API_BASE : "/api");
 
 export type SettingsResponse = {
   config_dir: string;
