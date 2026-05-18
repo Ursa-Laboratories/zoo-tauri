@@ -80,7 +80,7 @@ Build a Windows installer on a Windows runner:
 npm run tauri:build:windows
 ```
 
-The Windows workflow in `.github/workflows/windows-build.yml` uploads the generated NSIS setup executable as an artifact.
+The macOS and Windows build workflows run on pushes to `main` and version tags. They upload the generated DMG and NSIS setup executable as GitHub Actions artifacts.
 
 Defaults:
 

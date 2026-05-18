@@ -74,7 +74,7 @@ npm run tauri:build:mac
 npm run tauri:build:windows
 ```
 
-The macOS desktop build emits `src-tauri/target/release/bundle/macos/Zoo.app` and a compressed DMG in `src-tauri/target/release/bundle/dmg/`. The Windows build must run on Windows and emits an NSIS setup executable in `src-tauri/target/release/bundle/nsis/`.
+The macOS desktop build emits `src-tauri/target/release/bundle/macos/Zoo.app` and a compressed DMG in `src-tauri/target/release/bundle/dmg/`. The Windows build must run on Windows and emits an NSIS setup executable in `src-tauri/target/release/bundle/nsis/`. GitHub Actions builds both artifacts on pushes to `main` and version tags.
 
 ## Lint And Format
 
