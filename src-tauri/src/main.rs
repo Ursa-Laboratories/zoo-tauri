@@ -104,6 +104,7 @@ fn stop_backend(app_handle: &tauri::AppHandle) {
 
 fn main() {
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let child = spawn_backend(app)?;
             app.manage(BackendProcess(Mutex::new(Some(child))));

@@ -166,10 +166,24 @@ export const settingsApi = {
       method: "PUT",
       body: JSON.stringify({ config_dir }),
     }),
-  browse: () =>
-    request<SettingsResponse>("/settings/browse", {
+  browse: async () => {
+    if (isTauri) {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: "Select config directory",
+      });
+      if (!selected) {
+        throw new Error("cancelled");
+      }
+      return { config_dir: Array.isArray(selected) ? selected[0] : selected };
+    }
+
+    return request<SettingsResponse>("/settings/browse", {
       method: "POST",
-    }),
+    });
+  },
 };
 
 // Raw YAML
