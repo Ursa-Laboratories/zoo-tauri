@@ -28,9 +28,18 @@ fn sidecar_candidates(app: &tauri::App) -> Vec<PathBuf> {
     let name = sidecar_name();
     let mut candidates = Vec::new();
 
+    if let Ok(current_exe) = std::env::current_exe() {
+        if let Some(exe_dir) = current_exe.parent() {
+            candidates.push(exe_dir.join(&name));
+            candidates.push(exe_dir.join("zoo-backend"));
+        }
+    }
+
     if let Ok(resource_dir) = app.path().resource_dir() {
         candidates.push(resource_dir.join(&name));
+        candidates.push(resource_dir.join("zoo-backend"));
         candidates.push(resource_dir.join("binaries").join(&name));
+        candidates.push(resource_dir.join("binaries").join("zoo-backend"));
     }
 
     if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
