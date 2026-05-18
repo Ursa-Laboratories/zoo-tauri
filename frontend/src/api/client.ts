@@ -61,7 +61,7 @@ export const gantryApi = {
       method: "POST",
     }),
   jog: (x = 0, y = 0, z = 0) =>
-    request<import("../types").GantryPosition>("/gantry/jog", {
+    request<{ status: string }>("/gantry/jog", {
       method: "POST",
       body: JSON.stringify({ x, y, z }),
     }),
@@ -73,6 +73,46 @@ export const gantryApi = {
     request<{ status: string }>("/gantry/move-to", {
       method: "POST",
       body: JSON.stringify({ x, y, z }),
+    }),
+  moveToBlocking: (x: number, y: number, z: number) =>
+    request<import("../types").GantryPosition>("/gantry/move-to-blocking", {
+      method: "POST",
+      body: JSON.stringify({ x, y, z }),
+    }),
+  jogBlocking: (x = 0, y = 0, z = 0, timeout_s = 10) =>
+    request<import("../types").GantryPosition>("/gantry/jog-blocking", {
+      method: "POST",
+      body: JSON.stringify({ x, y, z, timeout_s }),
+    }),
+  setWorkCoordinates: (body: { x?: number; y?: number; z?: number }) =>
+    request<import("../types").GantryPosition>("/gantry/work-coordinates", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  prepareCalibrationOrigin: () =>
+    request<import("../types").GantryPosition>("/gantry/calibration/prepare-origin", {
+      method: "POST",
+    }),
+  homeAndCenterForCalibration: () =>
+    request<{
+      xy_bounds: { x: number; y: number; z: number };
+      position: { x: number; y: number; z: number };
+    }>("/gantry/calibration/home-and-center", {
+      method: "POST",
+    }),
+  restoreCalibrationSoftLimits: () =>
+    request<import("../types").GantryPosition>("/gantry/calibration/restore-soft-limits", {
+      method: "POST",
+    }),
+  configureSoftLimits: (body: {
+    max_travel_x: number;
+    max_travel_y: number;
+    max_travel_z: number;
+    tolerance_mm?: number;
+  }) =>
+    request<{ status: string }>("/gantry/soft-limits", {
+      method: "POST",
+      body: JSON.stringify(body),
     }),
   unlock: () =>
     request<import("../types").GantryPosition>("/gantry/unlock", {

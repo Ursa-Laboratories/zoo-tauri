@@ -31,13 +31,13 @@ labware:
     model_name: panda_2x2_tip_rack
     rows: 2
     columns: 2
-    z_pickup: 30.0
-    z_drop: 24.0
+    pickup_z: 30.0
+    drop_z: 24.0
     calibration:
       a1: { x: 10.0, y: 20.0 }
       a2: { x: 19.0, y: 20.0 }
-    x_offset_mm: 9.0
-    y_offset_mm: 9.0
+    x_offset: 9.0
+    y_offset: 9.0
 
   well_plate_holder:
     type: well_plate_holder
@@ -58,8 +58,8 @@ labware:
         a2:
           x: 109.0
           y: 120.0
-      x_offset_mm: 9.0
-      y_offset_mm: 9.0
+      x_offset: 9.0
+      y_offset: 9.0
 
   vial_holder:
     type: vial_holder
@@ -72,8 +72,8 @@ labware:
       vial_1:
         name: Sample 1
         model_name: 20ml_vial
-        height_mm: 57.0
-        diameter_mm: 28.0
+        height: 57.0
+        diameter: 28.0
         location:
           x: 30.0
           y: 60.0

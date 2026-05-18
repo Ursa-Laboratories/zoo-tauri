@@ -133,10 +133,17 @@ def _serialize_geometry(geometry: Any) -> Optional[Dict[str, Optional[float]]]:
     if geometry is None:
         return None
     return {
-        "length_mm": getattr(geometry, "length_mm", None),
-        "width_mm": getattr(geometry, "width_mm", None),
-        "height_mm": getattr(geometry, "height_mm", None),
+        "length_mm": _geometry_dimension(geometry, "length", "length_mm"),
+        "width_mm": _geometry_dimension(geometry, "width", "width_mm"),
+        "height_mm": _geometry_dimension(geometry, "height", "height_mm"),
     }
+
+
+def _geometry_dimension(geometry: Any, current_name: str, legacy_name: str) -> Optional[float]:
+    value = getattr(geometry, current_name, None)
+    if value is not None:
+        return value
+    return getattr(geometry, legacy_name, None)
 
 
 _LABWARE_TYPE_MAP: Dict[str, str] = {

@@ -4,6 +4,15 @@
 
 `Zoo` is a local web UI for `CubOS`. It edits YAML configs, visualizes deck state, controls gantry motion, and triggers protocol execution through CubOS APIs and classes.
 
+The gantry control surface also exposes a calibration wizard that turns CubOS'
+`setup/calibrate_gantry.py` flow into a guided UI. Operators still use CubOS
+movement semantics through Zoo jog/home/connect endpoints; the wizard saves the
+calibrated YAML through the same schema-validated gantry config path.
+The wizard is intentionally serial: after the operator selects the reference
+and lowest instrument, Zoo runs the blocking controller-prep/home steps, locks
+controls during automatic home/center/retract moves, and only exposes the next
+operator action when the current step completes.
+
 ## Key Directories
 
 | Path | Purpose |
@@ -14,6 +23,7 @@
 | `zoo/routers/` | REST endpoints for gantry, deck, protocol, raw, settings |
 | `zoo/services/` | YAML file helpers |
 | `frontend/src/` | React + TypeScript application |
+| `frontend/src/components/gantry/` | Gantry jog/readout controls and calibration wizard |
 | `configs/` | Default local config store, empty by default in this checkout |
 | `tests/` | Backend tests |
 
@@ -67,6 +77,7 @@ npm run build
 - Depends on `CubOS` from Git in `pyproject.toml`
 - Requires Node.js for frontend development and build
 - Talks directly to local gantry hardware through CubOS when operators use motion endpoints
+- Gantry calibration delegates work-coordinate and soft-limit operations to CubOS `Gantry` methods; Zoo only sequences the operator UI and YAML save. During XY origining, Zoo may temporarily disable stale soft limits and restores them on cancel, single-instrument XY completion, disconnect, or successful soft-limit programming.
 
 ## Known Pitfalls
 
@@ -76,3 +87,4 @@ npm run build
 - `raw` endpoints bypass schema-aware editing and can write malformed YAML if used carelessly.
 - The checked-in frontend README is a template and not authoritative project documentation.
 - CubOS staging no longer uses a separate mounted-instrument config in Zoo; instruments belong in gantry YAML.
+- Calibration can write a new gantry YAML and optionally program live GRBL soft-limit settings, so it should not be exercised without hardware clearance and an E-stop within reach.

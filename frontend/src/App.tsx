@@ -365,6 +365,12 @@ export default function App() {
       position={gantryPosition.data ?? null}
       workingVolume={workingVolume}
       gantryFile={gantryFile}
+      gantry={displayGantry}
+      onSaveCalibrated={async (filename, body) => {
+        const saved = await saveGantry.mutateAsync({ filename, body });
+        setGantryFile(saved.filename);
+        setLocalGantry(null);
+      }}
     />
   );
 

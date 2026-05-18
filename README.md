@@ -22,6 +22,14 @@ See also:
 - Operators can point Zoo at another config directory through the settings UI or API.
 - Gantry YAMLs are read back through CubOS validation before Zoo returns or saves them; missing current fields must be filled and saved in the gantry editor.
 
+## Gantry Calibration
+
+- The Gantry Control panel includes a `Calibrate` wizard after a gantry YAML is loaded.
+- The wizard mirrors CubOS' `setup/calibrate_gantry.py` operator flow as a serial, one-way workflow: prepare/home, jog XY origin with stale soft limits temporarily disabled, set Z from the calibration block, measure the homed volume, then save a calibrated gantry YAML.
+- Multi-instrument gantries add a tool-recording step that writes instrument `offset_x`, `offset_y`, and `depth` values from a shared block point.
+- The multi-instrument path automatically re-homes after XY origining, captures XY travel bounds, moves to deck center, and retracts Z after each tool record while controls are locked.
+- Calibration routes stay thin over CubOS `Gantry` methods for work-coordinate assignment and GRBL soft-limit programming; Zoo does not send raw serial commands directly.
+
 ## Run
 
 ```bash
@@ -50,5 +58,5 @@ Defaults:
 ## Notes
 
 - If `frontend/dist/` is missing, `python -m zoo` builds it automatically.
-- Gantry operations are hardware-touching and should be treated as high risk.
+- Gantry operations, including calibration, are hardware-touching and should be treated as high risk.
 - `frontend/README.md` is still the stock Vite template and is not authoritative documentation.

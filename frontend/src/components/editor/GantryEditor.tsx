@@ -35,11 +35,12 @@ const Y_AXIS_MOTION_OPTIONS = ["head", "bed"] as const;
 
 const EMPTY_GANTRY: GantryConfig = {
   serial_port: "",
+  gantry_type: "cub_xl",
   cnc: {
     homing_strategy: "standard",
-    total_z_height: 80,
+    total_z_range: 80,
     y_axis_motion: "head",
-    structure_clearance_z: 80,
+    safe_z: 80,
   },
   working_volume: { x_min: 0, x_max: 300, y_min: 0, y_max: 200, z_min: 0, z_max: 80 },
   grbl_settings: {},
@@ -172,9 +173,10 @@ export default function GantryEditor({
   const bcnc = base?.cnc;
   const d = {
     serial_port: !!config && !notDirty(config.serial_port, base?.serial_port ?? ""),
+    gantry_type: !!config && !notDirty(config.gantry_type, base?.gantry_type),
     homing_strategy: !!cnc && !notDirty(cnc.homing_strategy, bcnc?.homing_strategy),
-    total_z_height: !!cnc && !notDirty(cnc.total_z_height, bcnc?.total_z_height),
-    structure_clearance_z: !!cnc && !notDirty(cnc.structure_clearance_z, bcnc?.structure_clearance_z),
+    total_z_range: !!cnc && !notDirty(cnc.total_z_range, bcnc?.total_z_range),
+    safe_z: !!cnc && !notDirty(cnc.safe_z, bcnc?.safe_z),
     y_axis_motion: !!cnc && !notDirty(cnc.y_axis_motion, bcnc?.y_axis_motion),
     x_min: !!wv && !notDirty(wv.x_min, bwv?.x_min),
     x_max: !!wv && !notDirty(wv.x_max, bwv?.x_max),
@@ -214,6 +216,17 @@ export default function GantryEditor({
             />
             <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
               <SelectField
+                label="Gantry type"
+                value={config.gantry_type}
+                options={[
+                  { value: "cub", label: "Cub" },
+                  { value: "cub_xl", label: "Cub XL" },
+                ]}
+                onChange={(v) => commit({ ...config, gantry_type: v as "cub" | "cub_xl" })}
+                dirty={d.gantry_type}
+                required
+              />
+              <SelectField
                 label="Homing strategy"
                 value={config.cnc.homing_strategy}
                 options={HOMING_STRATEGIES.map((s) => ({ value: s, label: s }))}
@@ -228,17 +241,17 @@ export default function GantryEditor({
                 dirty={d.y_axis_motion}
               />
               <NumberField
-                label="Total Z height"
-                value={config.cnc.total_z_height}
-                onChange={(v) => commit({ ...config, cnc: { ...config.cnc, total_z_height: v } })}
-                dirty={d.total_z_height}
+                label="Total Z range"
+                value={config.cnc.total_z_range}
+                onChange={(v) => commit({ ...config, cnc: { ...config.cnc, total_z_range: v } })}
+                dirty={d.total_z_range}
                 required
               />
               <NumberField
-                label="Structure clearance Z"
-                value={Number(config.cnc.structure_clearance_z ?? config.cnc.total_z_height)}
-                onChange={(v) => commit({ ...config, cnc: { ...config.cnc, structure_clearance_z: v } })}
-                dirty={d.structure_clearance_z}
+                label="Safe Z"
+                value={Number(config.cnc.safe_z ?? config.working_volume.z_max)}
+                onChange={(v) => commit({ ...config, cnc: { ...config.cnc, safe_z: v } })}
+                dirty={d.safe_z}
               />
             </div>
           </div>
@@ -413,8 +426,8 @@ export default function GantryEditor({
 function isValidGantry(config: GantryConfig): boolean {
   const wv = config.working_volume;
   if (wv.x_min >= wv.x_max || wv.y_min >= wv.y_max || wv.z_min >= wv.z_max) return false;
-  if (config.cnc.total_z_height <= 0 || config.cnc.total_z_height < wv.z_max) return false;
-  if (config.cnc.structure_clearance_z != null && config.cnc.structure_clearance_z < 0) return false;
+  if (config.cnc.total_z_range <= 0 || config.cnc.total_z_range < wv.z_max) return false;
+  if (config.cnc.safe_z != null && (config.cnc.safe_z < wv.z_min || config.cnc.safe_z > wv.z_max)) return false;
   for (const inst of Object.values(config.instruments)) {
     if (!inst.type.trim() || !inst.vendor.trim()) return false;
     const measurement = Number(inst.measurement_height ?? 0);

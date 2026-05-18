@@ -18,7 +18,7 @@ from instruments.registry import (
     get_supported_types,
     get_supported_vendors,
 )
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from zoo.config import get_settings
 from zoo.models.gantry import GantryPosition, GantryResponse
@@ -35,6 +35,10 @@ _last_position: Optional[GantryPosition] = None
 # Non-blocking warning surfaced after connect when the controller settings do
 # not match the selected gantry YAML. The connection stays open for calibration.
 _calibration_warning: Optional[str] = None
+# During calibration, stale soft-limit travel can prevent the operator from
+# jogging to the true origin. Track whether Zoo disabled $20 so a cancel/skip
+# path can restore it.
+_calibration_restore_soft_limits = False
 
 # Primitive types that can be represented in YAML / JSON form fields.
 _PRIMITIVE_TYPES = {str, int, float, bool}
@@ -120,6 +124,20 @@ def _float_or(value: Any, fallback: float) -> float:
         return fallback
 
 
+def _schema_fields(model: Any) -> set[str]:
+    return set(getattr(model, "model_fields", {}) or {})
+
+
+def _gantry_schema_fields() -> set[str]:
+    return _schema_fields(GantryYamlSchema)
+
+
+def _cnc_schema_fields() -> set[str]:
+    cnc_field = getattr(GantryYamlSchema, "model_fields", {}).get("cnc")
+    cnc_model = getattr(cnc_field, "annotation", None)
+    return _schema_fields(cnc_model)
+
+
 def _normalize_gantry_yaml(data: Dict[str, Any]) -> Dict[str, Any]:
     """Lift older Zoo gantry YAMLs into CubOS staging's gantry schema.
 
@@ -128,6 +146,8 @@ def _normalize_gantry_yaml(data: Dict[str, Any]) -> Dict[str, Any]:
     fields that CubOS now requires so operators can save a corrected file.
     """
     normalized = copy.deepcopy(data)
+    gantry_fields = _gantry_schema_fields()
+    cnc_fields = _cnc_schema_fields()
     working_volume = dict(normalized.get("working_volume") or {})
     z_max = _float_or(working_volume.get("z_max"), 80.0)
     if z_max <= 0:
@@ -138,18 +158,38 @@ def _normalize_gantry_yaml(data: Dict[str, Any]) -> Dict[str, Any]:
     if cnc.get("y_axis_motion") not in {"head", "bed"}:
         cnc["y_axis_motion"] = "head"
 
-    total_z_height = max(_float_or(cnc.get("total_z_height"), z_max), z_max)
-    cnc["total_z_height"] = total_z_height
-    if cnc.get("structure_clearance_z") is None:
-        cnc["structure_clearance_z"] = total_z_height
+    total_z = max(
+        _float_or(cnc.get("total_z_range", cnc.get("total_z_height")), z_max),
+        z_max,
+    )
+    if "total_z_range" in cnc_fields:
+        cnc["total_z_range"] = total_z
+    if "total_z_height" in cnc_fields:
+        cnc["total_z_height"] = total_z
+    if "structure_clearance_z" in cnc_fields and cnc.get("structure_clearance_z") is None:
+        cnc["structure_clearance_z"] = total_z
+    if cnc_fields:
+        for key in list(cnc):
+            if key not in cnc_fields:
+                cnc.pop(key, None)
 
     normalized["cnc"] = cnc
     normalized["working_volume"] = working_volume
-    normalized.setdefault("grbl_settings", {})
-    if not isinstance(normalized.get("instruments"), dict):
-        normalized["instruments"] = {}
+    if "gantry_type" in gantry_fields and "gantry_type" not in normalized:
+        x_max = _float_or(working_volume.get("x_max"), 0.0)
+        y_max = _float_or(working_volume.get("y_max"), 0.0)
+        normalized["gantry_type"] = "cub_xl" if x_max > 310 or y_max > 220 else "cub"
+    if "grbl_settings" in gantry_fields:
+        normalized.setdefault("grbl_settings", {})
     else:
-        normalized.setdefault("instruments", {})
+        normalized.pop("grbl_settings", None)
+    if "instruments" in gantry_fields:
+        if not isinstance(normalized.get("instruments"), dict):
+            normalized["instruments"] = {}
+        else:
+            normalized.setdefault("instruments", {})
+    else:
+        normalized.pop("instruments", None)
     return normalized
 
 
@@ -342,6 +382,65 @@ class MoveToRequest(BaseModel):
     z: float
 
 
+class SetWorkCoordinatesRequest(BaseModel):
+    x: Optional[float] = None
+    y: Optional[float] = None
+    z: Optional[float] = None
+
+    @model_validator(mode="after")
+    def _at_least_one_axis(self) -> "SetWorkCoordinatesRequest":
+        if self.x is None and self.y is None and self.z is None:
+            raise ValueError("At least one axis must be supplied.")
+        return self
+
+
+class ConfigureSoftLimitsRequest(BaseModel):
+    max_travel_x: float
+    max_travel_y: float
+    max_travel_z: float
+    tolerance_mm: float = 0.25
+
+
+class JogBlockingRequest(BaseModel):
+    x: float = 0.0
+    y: float = 0.0
+    z: float = 0.0
+    timeout_s: float = 10.0
+
+
+class CalibrationCenterResponse(BaseModel):
+    xy_bounds: Dict[str, float]
+    position: Dict[str, float]
+
+
+def _wait_until_idle(*, timeout_s: float = 10.0, poll_interval_s: float = 0.1) -> None:
+    """Block until CubOS reports the gantry is no longer jogging/running."""
+    if _gantry is None:
+        raise HTTPException(400, "Gantry not connected")
+    deadline = time.monotonic() + timeout_s
+    last_status = ""
+    while time.monotonic() < deadline:
+        try:
+            last_status = str(_gantry.get_status())
+        except Exception as exc:
+            raise HTTPException(500, f"Status wait failed: {exc}")
+        lowered = last_status.lower()
+        if "idle" in lowered:
+            return
+        if "alarm" in lowered or "error" in lowered:
+            raise HTTPException(500, f"Gantry entered {last_status} while waiting for motion to finish")
+        time.sleep(poll_interval_s)
+    raise HTTPException(500, f"Timed out waiting for gantry to become idle; last status: {last_status}")
+
+
+def _restore_calibration_soft_limits_if_needed() -> None:
+    global _calibration_restore_soft_limits
+    if _gantry is None or not _calibration_restore_soft_limits:
+        return
+    _gantry.set_soft_limits_enabled(True)
+    _calibration_restore_soft_limits = False
+
+
 _move_error: Optional[str] = None
 
 
@@ -365,6 +464,122 @@ def move_to(req: MoveToRequest) -> dict:
     thread = threading.Thread(target=_move_worker, args=(req.x, req.y, req.z), daemon=True)
     thread.start()
     return {"status": "ok"}
+
+
+@router.post("/move-to-blocking")
+def move_to_blocking(req: MoveToRequest) -> GantryPosition:
+    """Move to absolute coordinates and return only after CubOS finishes."""
+    if _gantry is None:
+        raise HTTPException(400, "Gantry not connected")
+    with _serial_lock:
+        try:
+            _gantry.move_to(x=req.x, y=req.y, z=req.z)
+        except Exception as e:
+            raise HTTPException(500, f"Move failed: {e}")
+    return get_position()
+
+
+@router.post("/jog-blocking")
+def jog_blocking(req: JogBlockingRequest) -> GantryPosition:
+    """Jog by a relative offset and block until the controller is idle."""
+    if _gantry is None:
+        raise HTTPException(400, "Gantry not connected")
+    if req.x == 0 and req.y == 0 and req.z == 0:
+        return get_position()
+    with _serial_lock:
+        try:
+            _gantry.jog(x=req.x, y=req.y, z=req.z)
+            _wait_until_idle(timeout_s=req.timeout_s)
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(500, f"Jog failed: {e}")
+    return get_position()
+
+
+@router.post("/work-coordinates")
+def set_work_coordinates(req: SetWorkCoordinatesRequest) -> GantryPosition:
+    """Assign the current physical pose to the supplied CubOS WPos axis values."""
+    if _gantry is None:
+        raise HTTPException(400, "Gantry not connected")
+    with _serial_lock:
+        try:
+            _gantry.set_work_coordinates(x=req.x, y=req.y, z=req.z)
+        except Exception as e:
+            raise HTTPException(500, f"Set work coordinates failed: {e}")
+    return get_position()
+
+
+@router.post("/soft-limits")
+def configure_soft_limits(req: ConfigureSoftLimitsRequest) -> dict:
+    """Program GRBL soft-limit travel spans through CubOS Gantry semantics."""
+    global _calibration_restore_soft_limits
+    if _gantry is None:
+        raise HTTPException(400, "Gantry not connected")
+    with _serial_lock:
+        try:
+            _gantry.configure_soft_limits_from_spans(
+                max_travel_x=req.max_travel_x,
+                max_travel_y=req.max_travel_y,
+                max_travel_z=req.max_travel_z,
+                tolerance_mm=req.tolerance_mm,
+            )
+            _calibration_restore_soft_limits = False
+        except Exception as e:
+            raise HTTPException(500, f"Soft-limit configuration failed: {e}")
+    return {"status": "ok"}
+
+
+@router.post("/calibration/prepare-origin")
+def prepare_calibration_origin() -> GantryPosition:
+    """Run the blocking CubOS setup before the interactive XY-origin jog."""
+    global _calibration_restore_soft_limits
+    if _gantry is None:
+        raise HTTPException(400, "Gantry not connected")
+    with _serial_lock:
+        try:
+            _gantry.home()
+            _gantry.enforce_work_position_reporting()
+            _gantry.activate_work_coordinate_system("G54")
+            _gantry.clear_g92_offsets()
+            enabled = _gantry.soft_limits_enabled()
+            if enabled is True:
+                _gantry.set_soft_limits_enabled(False)
+                _calibration_restore_soft_limits = True
+        except Exception as e:
+            raise HTTPException(500, f"Calibration preparation failed: {e}")
+    return get_position()
+
+
+@router.post("/calibration/home-and-center")
+def calibration_home_and_center() -> CalibrationCenterResponse:
+    """Home after XY origining, capture X/Y bounds, then move to the deck center."""
+    if _gantry is None:
+        raise HTTPException(400, "Gantry not connected")
+    with _serial_lock:
+        try:
+            _gantry.home()
+            bounds = dict(_gantry.get_coordinates())
+            center_x = round(float(bounds["x"]) / 2.0, 3)
+            center_y = round(float(bounds["y"]) / 2.0, 3)
+            _gantry.move_to(center_x, center_y, float(bounds["z"]))
+            position = dict(_gantry.get_coordinates())
+        except Exception as e:
+            raise HTTPException(500, f"Home and center failed: {e}")
+    return CalibrationCenterResponse(xy_bounds=bounds, position=position)
+
+
+@router.post("/calibration/restore-soft-limits")
+def restore_calibration_soft_limits() -> GantryPosition:
+    """Restore soft limits if Zoo disabled them for a calibration jog."""
+    if _gantry is None:
+        raise HTTPException(400, "Gantry not connected")
+    with _serial_lock:
+        try:
+            _restore_calibration_soft_limits_if_needed()
+        except Exception as e:
+            raise HTTPException(500, f"Soft-limit restore failed: {e}")
+    return get_position()
 
 
 @router.post("/unlock")
@@ -451,17 +666,19 @@ def connect(body: Optional[ConnectRequest] = None) -> GantryPosition:
 
 @router.post("/disconnect")
 def disconnect() -> GantryPosition:
-    global _gantry, _calibration_warning
+    global _gantry, _calibration_warning, _calibration_restore_soft_limits
     if _gantry is None:
         return GantryPosition(connected=False, status="Disconnected")
     # Clear the module global inside the lock so concurrent /position
     # polls don't see _gantry set to a mill object that's mid-disconnect.
     with _serial_lock:
         try:
+            _restore_calibration_soft_limits_if_needed()
             _gantry.disconnect()
         finally:
             _gantry = None
             _calibration_warning = None
+            _calibration_restore_soft_limits = False
     return GantryPosition(connected=False, status="Disconnected")
 
 

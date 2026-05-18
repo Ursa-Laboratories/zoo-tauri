@@ -1,18 +1,28 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { gantryApi } from "../../api/client";
-import type { GantryPosition, WorkingVolume } from "../../types";
+import type { GantryConfig, GantryPosition, GantryResponse, WorkingVolume } from "../../types";
+import CalibrationWizard from "./CalibrationWizard";
 
 interface Props {
   position: GantryPosition | null;
   workingVolume: WorkingVolume | null;
   gantryFile: string | null;
+  gantry: GantryResponse | null;
+  onSaveCalibrated: (filename: string, config: GantryConfig) => Promise<void>;
 }
 
 const JOG_INTERVAL_MS = 150;
 
-export default function GantryPositionWidget({ position, workingVolume, gantryFile }: Props) {
+export default function GantryPositionWidget({
+  position,
+  workingVolume,
+  gantryFile,
+  gantry,
+  onSaveCalibrated,
+}: Props) {
   const [loading, setLoading] = useState(false);
   const [jogBusy, setJogBusy] = useState(false);
+  const [calibrationOpen, setCalibrationOpen] = useState(false);
   const [stepXY, setStepXY] = useState("0.5");
   const [stepZ, setStepZ] = useState("0.5");
   const [moveX, setMoveX] = useState("");
@@ -155,6 +165,7 @@ export default function GantryPositionWidget({ position, workingVolume, gantryFi
   const xyBelowMin = (parseFloat(stepXY) || 0) > 0 && (parseFloat(stepXY) || 0) < MIN_STEP;
   const zBelowMin = (parseFloat(stepZ) || 0) > 0 && (parseFloat(stepZ) || 0) < MIN_STEP;
   const jogDisabled = !connected || jogBusy;
+  const canCalibrate = !!gantry;
 
   const jogBtnProps = (x: number, y: number, z: number) => ({
     onMouseDown: () => !jogDisabled && startJog(x, y, z),
@@ -324,10 +335,22 @@ export default function GantryPositionWidget({ position, workingVolume, gantryFi
         </div>
       </div>
 
-      {/* Home button */}
-      <div style={{ marginBottom: 10, display: "flex", gap: 8 }}>
+      {/* Home and calibration */}
+      <div style={{ marginBottom: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
         <button onClick={handleHome} disabled={jogDisabled} style={homeBtnStyle}>
           Home
+        </button>
+        <button
+          onClick={() => setCalibrationOpen(true)}
+          disabled={!canCalibrate}
+          style={{
+            ...calibrateBtnStyle,
+            opacity: canCalibrate ? 1 : 0.45,
+            cursor: canCalibrate ? "pointer" : "not-allowed",
+          }}
+          title={canCalibrate ? "Open gantry calibration" : "Load a gantry config first"}
+        >
+          Calibrate
         </button>
       </div>
 
@@ -403,6 +426,13 @@ export default function GantryPositionWidget({ position, workingVolume, gantryFi
       <div style={{ fontSize: 10, color: "#bbb", marginTop: 8 }}>
         Keyboard: Arrow keys = XY, X/Z keys = Z up/down
       </div>
+      <CalibrationWizard
+        open={calibrationOpen}
+        onClose={() => setCalibrationOpen(false)}
+        gantry={gantry}
+        position={position}
+        onSaveCalibrated={onSaveCalibrated}
+      />
     </div>
   );
 }
@@ -445,6 +475,17 @@ const homeBtnStyle: React.CSSProperties = {
   cursor: "pointer",
   fontSize: 12,
   fontWeight: 600,
+};
+
+const calibrateBtnStyle: React.CSSProperties = {
+  background: "#0f766e",
+  color: "#fff",
+  border: "1px solid #0f766e",
+  padding: "5px 16px",
+  borderRadius: 4,
+  cursor: "pointer",
+  fontSize: 12,
+  fontWeight: 700,
 };
 
 const jogBtnStyle: React.CSSProperties = {
