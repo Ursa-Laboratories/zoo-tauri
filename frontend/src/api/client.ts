@@ -1,3 +1,5 @@
+import { open } from "@tauri-apps/plugin-dialog";
+
 const DEFAULT_DESKTOP_API_BASE = "http://127.0.0.1:8742/api";
 const isTauri =
   "__TAURI_INTERNALS__" in window ||
@@ -168,7 +170,6 @@ export const settingsApi = {
     }),
   browse: async () => {
     if (isTauri) {
-      const { open } = await import("@tauri-apps/plugin-dialog");
       const selected = await open({
         directory: true,
         multiple: false,
