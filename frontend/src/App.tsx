@@ -7,7 +7,7 @@ import EditorTabs from "./components/editor/EditorTabs";
 import DeckEditor from "./components/editor/DeckEditor";
 import GantryEditor from "./components/editor/GantryEditor";
 import ProtocolEditor from "./components/editor/ProtocolEditor";
-import { settingsApi, deckApi, protocolApi } from "./api/client";
+import { settingsApi, deckApi, gantryApi, protocolApi } from "./api/client";
 import { useDeckConfigs, useDeck, useSaveDeck } from "./hooks/useDeck";
 import {
   useGantryPosition,
@@ -34,12 +34,17 @@ function configDirFromSettings(settings: SettingsResponse): string {
 
 const WORKING_DECK_FILENAME = "panda-deck.yaml";
 
+function selectDefaultDeckFile(configs: string[]): string | null {
+  return configs.includes(WORKING_DECK_FILENAME) ? WORKING_DECK_FILENAME : configs[0] ?? null;
+}
+
 export default function App() {
   const qc = useQueryClient();
   const [activeTab, setActiveTab] = useState("Gantry");
   const [campaignId, setCampaignId] = useState("");
   const [configDir, setConfigDir] = useState<string | null>(null);
   const [browseLoading, setBrowseLoading] = useState(false);
+  const [browseError, setBrowseError] = useState<string | null>(null);
 
   const [deckFile, setDeckFile] = useState<string | null>(null);
   const [gantryFile, setGantryFile] = useState<string | null>(null);
@@ -59,16 +64,22 @@ export default function App() {
 
   const handleBrowse = async () => {
     setBrowseLoading(true);
+    setBrowseError(null);
     try {
       const browseResult = await settingsApi.browse();
       const selectedPath = configDirFromSettings(browseResult);
       const savedSettings = await settingsApi.update(selectedPath);
       setConfigDir(configDirFromSettings(savedSettings));
       refreshAll();
+      setDeckFile(null);
+      setGantryFile(null);
+      setProtocolFile(null);
+      await refreshConfigListsAndSelect();
     } catch (err) {
       // Distinguish cancellation (no selected path) from a real API failure.
       if (err instanceof Error && err.message !== "cancelled") {
         console.error("Browse/settings update failed:", err);
+        setBrowseError(err.message);
       }
     } finally {
       setBrowseLoading(false);
@@ -91,6 +102,20 @@ export default function App() {
   const protocolQuery = useProtocol(protocolFile);
   const saveProtocol = useSaveProtocol();
   const validateProtocol = useValidateProtocol();
+
+  async function refreshConfigListsAndSelect() {
+    const [nextDeckConfigs, nextGantryConfigs, nextProtocolConfigs] = await Promise.all([
+      deckApi.listConfigs(),
+      gantryApi.listConfigs(),
+      protocolApi.listConfigs(),
+    ]);
+    qc.setQueryData(["deck", "configs"], nextDeckConfigs);
+    qc.setQueryData(["gantry", "configs"], nextGantryConfigs);
+    qc.setQueryData(["protocol", "configs"], nextProtocolConfigs);
+    setDeckFile(selectDefaultDeckFile(nextDeckConfigs));
+    setGantryFile(nextGantryConfigs[0] ?? null);
+    setProtocolFile(nextProtocolConfigs[0] ?? null);
+  }
 
   // Local working copies of each editor's edits, kept in App state so
   // they survive tab switches (each editor unmounts on tab-away, which
@@ -257,6 +282,7 @@ export default function App() {
               {browseLoading ? "..." : "Browse"}
             </button>
           </div>
+          {browseError && <span style={{ color: "#b91c1c" }}>Browse failed: {browseError}</span>}
         </label>
       </div>
       <EditorTabs
