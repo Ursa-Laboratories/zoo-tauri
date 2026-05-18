@@ -27,6 +27,7 @@ Use CubOS public modules/classes instead of duplicating behavior:
 - Deck/config validation: `load_deck_from_yaml`, CubOS deck schemas/loaders.
 - Gantry/instrument validation: CubOS gantry schema and instrument registry.
 - Movement: CubOS `Gantry` and public protocol/movement methods.
+- Calibration: keep Zoo UI/API orchestration thin over CubOS `Gantry` methods and the canonical serial flow in `CubOS/setup/calibrate_gantry.py`, including blocking home/center/retract operations and temporary XY-origin soft-limit disabling.
 - Protocols: CubOS protocol loaders/runtime APIs using gantry, deck, and protocol configs.
 
 Never send raw serial/GRBL from Zoo and never prepend local CubOS source paths onto `sys.path`.
@@ -38,7 +39,7 @@ Read these before changing the React UI:
 - `frontend/src/api/client.ts` — API client functions.
 - `frontend/src/types/index.ts` — API payload types; keep them response/input shapes, not duplicated CubOS schema truth.
 - `frontend/src/hooks/` — TanStack Query hooks.
-- `frontend/src/components/` — UI components.
+- `frontend/src/components/` — UI components; gantry jog/readout and calibration UI live under `frontend/src/components/gantry/`.
 - `frontend/src/utils/coordinates.ts` — coordinate/display helpers.
 - `frontend/src/*.test.tsx`, `frontend/src/**/*.test.tsx` — frontend behavior tests.
 

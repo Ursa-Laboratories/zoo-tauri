@@ -174,9 +174,9 @@ export interface WorkingVolume {
 
 export interface CncConfig {
   homing_strategy: "standard";
-  total_z_height: number;
+  total_z_range: number;
   y_axis_motion?: "head" | "bed";
-  structure_clearance_z?: number | null;
+  safe_z?: number | null;
 }
 
 export interface GrblSettingsConfig {
@@ -203,6 +203,7 @@ export interface GrblSettingsConfig {
 
 export interface GantryConfig {
   serial_port: string;
+  gantry_type: "cub" | "cub_xl";
   cnc: CncConfig;
   working_volume: WorkingVolume;
   grbl_settings?: GrblSettingsConfig | null;

@@ -55,11 +55,12 @@ function createState(): ApiState {
         filename: "cubos.yaml",
         config: {
           serial_port: "",
+          gantry_type: "cub_xl",
           cnc: {
             homing_strategy: "standard",
-            total_z_height: 80,
+            total_z_range: 80,
             y_axis_motion: "head",
-            structure_clearance_z: 80,
+            safe_z: 80,
           },
           working_volume: { x_min: 0, x_max: 300, y_min: 0, y_max: 200, z_min: 0, z_max: 80 },
           grbl_settings: {},
@@ -125,6 +126,18 @@ function toProtocolResponse(filename: string, body: ProtocolConfig): ProtocolRes
 }
 
 function installFetchMock(state: ApiState) {
+  let gantryConnected = false;
+  const gantryPosition = (x = 0, y = 0, z = 0) => ({
+    x,
+    y,
+    z,
+    work_x: x,
+    work_y: y,
+    work_z: z,
+    status: "Idle",
+    connected: gantryConnected,
+  });
+
   const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(
       typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url,
@@ -176,16 +189,37 @@ function installFetchMock(state: ApiState) {
       ]);
     }
     if (path === "/api/gantry/position") {
+      return jsonResponse(gantryPosition());
+    }
+    if (path === "/api/gantry/connect" && method === "POST") {
+      gantryConnected = true;
+      return jsonResponse(gantryPosition());
+    }
+    if (path === "/api/gantry/calibration/prepare-origin" && method === "POST") {
+      gantryConnected = true;
+      return jsonResponse(gantryPosition());
+    }
+    if (path === "/api/gantry/calibration/home-and-center" && method === "POST") {
+      gantryConnected = true;
       return jsonResponse({
-        x: 0,
-        y: 0,
-        z: 0,
-        work_x: 0,
-        work_y: 0,
-        work_z: 0,
-        status: "Idle",
-        connected: false,
+        xy_bounds: { x: 300, y: 200, z: 80 },
+        position: { x: 150, y: 100, z: 80 },
       });
+    }
+    if (path === "/api/gantry/calibration/restore-soft-limits" && method === "POST") {
+      return jsonResponse(gantryPosition());
+    }
+    if (path === "/api/gantry/work-coordinates" && method === "POST") {
+      return jsonResponse(gantryPosition(body?.x ?? 0, body?.y ?? 0, body?.z ?? 0));
+    }
+    if (path === "/api/gantry/jog-blocking" && method === "POST") {
+      return jsonResponse(gantryPosition(0, 0, body?.z ?? 0));
+    }
+    if (path === "/api/gantry/home" && method === "POST") {
+      return jsonResponse(gantryPosition(300, 200, 80));
+    }
+    if (path === "/api/gantry/soft-limits" && method === "POST") {
+      return jsonResponse({ status: "ok" });
     }
     if (path === "/api/deck/preview-wells" && method === "POST") {
       return jsonResponse({});
@@ -351,6 +385,32 @@ describe("Zoo editor interactions", () => {
     await user.click(screen.getByRole("button", { name: "Gantry" }));
 
     await waitFor(() => expect(screen.getByLabelText("Port *")).toHaveValue("/dev/ttyUSB4"));
+  });
+
+  it("opens the gantry calibration wizard from the control panel", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.mocked(fetch);
+    renderApp();
+    await waitForSettingsLoad();
+
+    await importConfig(user, "Import gantry config", "cubos.yaml");
+    await user.click(await screen.findByRole("button", { name: "Calibrate" }));
+
+    expect(screen.getByRole("dialog", { name: "Gantry calibration" })).toBeInTheDocument();
+    expect(screen.getByText(/single-instrument deck origin/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /XY origin/ })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+
+    expect(await screen.findByRole("button", { name: "Home gantry" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Home gantry" }));
+
+    expect(await screen.findByRole("button", { name: "Set XY origin" })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/gantry/calibration/prepare-origin",
+      expect.objectContaining({ method: "POST" }),
+    );
   });
 
   it("loads and saves a protocol config across tab switches", async () => {
